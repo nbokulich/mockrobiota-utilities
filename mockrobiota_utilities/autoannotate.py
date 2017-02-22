@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 # ----------------------------------------------------------------------------
 # Copyright (c) 2016--, mockrobiota development team.
 #
@@ -12,8 +10,9 @@
 from os.path import join, exists
 from os import makedirs
 import re
-import sys
-import getopt
+import csv
+
+import click
 
 
 def add_lists(l1, l2):
@@ -37,122 +36,35 @@ def choose_taxonomy(query_name, query_set, taxa_fp):
 
 
 def manual_search(query_name, taxa_fp):
-            print('\n\n{0} has no matches to {1}.'.format(query_name, taxa_fp))
-            print('Perform a manual search of your reference database to')
-            print('match the nearest basal lineage.')
-            print('\nEnter the correct taxonomy for the basal lineage here:')
-            lineage = input('> ')
-            return lineage
+    print('\n\n{0} has no matches to {1}.'.format(query_name, taxa_fp))
+    print('Perform a manual search of your reference database to')
+    print('match the nearest basal lineage.')
+    print('\nEnter the correct taxonomy for the basal lineage here:')
+    lineage = input('> ')
+    return lineage
 
 
-usage = '''usage: autoannotate-taxa.py -i <source_fp>
-                                  -o <destination_dir>
-                                  -r <reference taxonomy>
-                                  -p <string separator>
-                                  -g <genus placeholder>
-                                  -s <species placeholder>
-
-    Generate full taxonomy strings from a reference database, given
-    a list of "source" genus and species names.
-
-    -i / --infile: filepath
-        tab-separated list of genus/species names and [optionally]
-        relative abundances in format:
-        Taxonomy    Sample1
-        Lactobacillus plantarum 0.5
-        Pediococcus damnosus    0.5
-
-    -o / --outfile: path
-        directory in which to write annotated taxonomy file
-
-    -r / --ref_taxa: filepath
-        tab-separated list of semicolon-delimited taxonomy strings
-        associated with reference sequences. In format:
-        seqID   taxonomy
-        0001    kingdom;phylum;class;order;family;genus;species
-
-    -p / --separator: str
-        taxonomy strings are separated with this string pattern.
-        Default = ";"
-
-    -g / --genus: str
-        Placeholder to use for taxa that have no genus-level match
-        in reference taxonomy file. Should match the conventions
-        that are used in that reference taxonomy file.
-        Default = "g__"
-
-    -s / --species: str
-        Placeholder to use for taxa that have no species-level match
-        in reference taxonomy file. Should match the conventions
-        that are used in that reference taxonomy file.
-        Default = "s__"
-
-    '''
+def parse_taxonomy_file(source):
+    'generate dict of {name: (genus, species, abundances)}'
+    sample_list = source.readline().strip().split('\t')[1:]
+    taxa = {}
+    for l in source:
+        # convert abundances to float
+        abundances = list(map(float, l.strip().split('\t')[1:]))
+        name = l.strip().split('\t')[0]
+        # level labels (e.g., Silva's 'D_11__') can confabulate this.
+        # Hence, do split on '__' instead of sep to remove level labels
+        taxon = re.split(' |_', name.split(';')[-1])[0:2]
+        if name not in taxa.keys():
+            taxa[name] = (taxon, abundances)
+        else:
+            # if species is replicated, collapse abundances
+            taxa[name] = (taxon, add_lists(taxa[name][1], abundances))
+    return sample_list, taxa
 
 
-def main(argv):
-    source_fp = ''
-    destination_dir = ''
-    ref_taxa_fp = ''
-    sep = ';'
-    gen = 'g__'
-    sp = 's__'
-
-    try:
-        opts, args = getopt.getopt(argv, "hi:o:r:p:g:s:", ["help",
-                                                           "infile=",
-                                                           "outdir=",
-                                                           "ref_taxa=",
-                                                           "separator",
-                                                           "genus",
-                                                           "species"])
-    except getopt.GetoptError:
-        print(usage)
-        sys.exit(2)
-
-    for opt, arg in opts:
-        if opt in ("-h", "--help"):
-            print(usage)
-            sys.exit()
-        elif opt in ("-i", "--infile"):
-            source_fp = arg
-        elif opt in ("-o", "--outdir"):
-            destination_dir = arg
-        elif opt in ("-r", "--ref_taxa"):
-            ref_taxa_fp = arg
-        elif opt in ("-p", "--separator"):
-            sep = arg
-        elif opt in ("-g", "--genus"):
-            gen = arg
-        elif opt in ("-s", "--species"):
-            sp = arg
-
-    # generate dict of {name: (genus, species, abundances)}
-    with open(source_fp, "r") as source:
-        sample_list = source.readline().strip().split('\t')[1:]
-        taxa = {}
-        for l in source:
-            # convert abundances to float
-            abundances = list(map(float, l.strip().split('\t')[1:]))
-            name = l.strip().split('\t')[0]
-            # level labels (e.g., Silva's 'D_11__') can confabulate this.
-            # Hence, do split on '__' instead of sep to remove level labels
-            taxon = re.split(' |_', name.split(';')[-1])[0:2]
-            if name not in taxa.keys():
-                taxa[name] = (taxon, abundances)
-            else:
-                # if species is replicated, collapse abundances
-                taxa[name] = (taxon, add_lists(taxa[name][1], abundances))
-
-    # parse ref taxonomy
-    with open(ref_taxa_fp, "r") as ref:
-        ref_taxa = {l.strip().split('\t')[1]: (
-                        l.strip().split('\t')[1].split(sep)[-2],
-                        l.strip().split('\t')[1].split(sep)[-1],
-                        l.strip().split('\t')[0]
-                        ) for l in ref}
-
-    # find matching taxonomies
+def find_matching_taxonomies(sample_list, taxa, ref_taxa, sep, gen, sp,
+                             taxa_fp):
     species_match = 0
     genus_match = 0
     family_match = 0
@@ -231,7 +143,7 @@ def main(argv):
             species_match += 1
 
             if len(species_set) > 1:
-                species = choose_taxonomy(name, species_set, ref_taxa_fp)
+                species = choose_taxonomy(name, species_set, taxa_fp)
             else:
                 species = list(species_set)[0]
 
@@ -247,7 +159,7 @@ def main(argv):
             genus_match += 1
 
             if len(genus_set) > 1:
-                genus = choose_taxonomy(name, genus_set, ref_taxa_fp)
+                genus = choose_taxonomy(name, genus_set, taxa_fp)
             else:
                 genus = list(genus_set)[0]
 
@@ -272,7 +184,7 @@ def main(argv):
         else:
             no_match += 1
 
-            lineage = manual_search(name, ref_taxa_fp)
+            lineage = manual_search(name, taxa_fp)
             if lineage not in new_taxa.keys():
                 new_taxa[lineage] = (name, t[1])
             else:
@@ -297,25 +209,128 @@ def main(argv):
         for dup in duplicates:
             print('{0}\t{1}'.format(dup[0], dup[1]))
 
-    # Write to file
-    if not exists(destination_dir):
-        makedirs(destination_dir)
+    return duplicates, seq_ids, new_taxa
 
-    with open(join(destination_dir, 'expected-taxonomy.tsv'), "w") as dest:
-        dest.write('Taxonomy\t{0}\n'.format('\t'.join(sample_list)))
-        for name, t in new_taxa.items():
-            abundances = ["{:.10f}".format(n) for n in t[1]]
-            dest.write('{0}\t{1}\n'.format(name, '\t'.join(abundances)))
 
-    with open(join(destination_dir, 'database-identifiers.tsv'), "w") as dest:
-        for t, seq_id in seq_ids.items():
-            dest.write('{0}\t{1}\n'.format(t, '\t'.join(seq_id)))
-
+def print_warning():
     print('\n\nWARNING: it is your responsibility to ensure the accuracy of')
     print('all output files. Manually review the expected-taxonomy.tsv to')
     print('ensure that (1) all taxonomy strings are accurately represented')
     print('and (2) all relative abundances sum to 1.0')
 
 
-if __name__ == "__main__":
-    main(sys.argv[1:])
+@click.command()
+@click.option('-i', '--infile', type=click.File('r'), required=True,
+              help='tab-separated list of genus/species names and '
+              '[optionally] relative abundances in format:\n'
+              'Taxonomy    Sample1\n'
+              'Lactobacillus plantarum 0.5\n'
+              'Pediococcus damnosus    0.5\n')
+@click.option('-o', '--outdir', required=True,
+              type=click.Path(file_okay=False, readable=False),
+              help='directory in which to write annotated taxonomy file')
+@click.option('-r', '--ref-taxa', type=click.File('r'), required=True,
+              help='tab-separated list of semicolon-delimited taxonomy '
+              'strings associated with reference sequences. In format:\n'
+              'seqID   taxonom\n'
+              '0001    kingdom;phylum;class;order;family;genus;species')
+@click.option('-p', '--separator', default=';',
+              help='taxonomy strings are separated with this string pattern.')
+@click.option('-g', '--genus', default=' g__',
+              help='Placeholder to use for taxa that have no genus-level match'
+              ' in reference taxonomy file. Should match the conventions '
+              'that are used in that reference taxonomy file.')
+@click.option('-s', '--species', default=' s__',
+              help='Placeholder to use for taxa that have no species-level '
+              'match in reference taxonomy file. Should match the conventions '
+              'that are used in that reference taxonomy file.')
+def main(infile, outdir, ref_taxa, separator, genus, species):
+    '''Generate full taxonomy strings from a reference database, given
+    a list of "source" genus and species names.
+    '''
+
+    sample_list, taxa = parse_taxonomy_file(infile)
+
+    # parse ref taxonomy
+    ref = {l.strip().split('\t')[1]: (
+                    l.strip().split('\t')[1].split(separator)[-2],
+                    l.strip().split('\t')[1].split(separator)[-1],
+                    l.strip().split('\t')[0]
+                    ) for l in ref_taxa}
+
+    duplicates, seq_ids, new_taxa = \
+        find_matching_taxonomies(sample_list, taxa, ref, separator, genus,
+                                 species, ref_taxa.name)
+
+    # Write to file
+    if not exists(outdir):
+        makedirs(outdir)
+
+    with open(join(outdir, 'expected-taxonomy.tsv'), "w") as dest:
+        dest.write('Taxonomy\t{0}\n'.format('\t'.join(sample_list)))
+        for name, t in new_taxa.items():
+            abundances = ["{:.10f}".format(n) for n in t[1]]
+            dest.write('{0}\t{1}\n'.format(name, '\t'.join(abundances)))
+
+    with open(join(outdir, 'database-identifiers.tsv'), "w") as dest:
+        for t, seq_id in seq_ids.items():
+            dest.write('{0}\t{1}\n'.format(t, '\t'.join(seq_id)))
+
+    print_warning()
+
+
+@click.command()
+@click.option('-i', '--infile', type=click.File('r'), required=True,
+              help='tab-separated list of genus/species names and '
+              '[optionally] relative abundances in format:\n'
+              'Taxonomy    Sample1\n'
+              'Lactobacillus plantarum 0.5\n'
+              'Pediococcus damnosus    0.5\n')
+@click.option('-e', '--expected-taxonomy', type=click.File('r'),
+              required=True,
+              help='tab-separated list of genus/species names and '
+              '[optionally] relative abundances. Result of previous call to '
+              'autoannotate')
+@click.option('-o', '--outdir', required=True,
+              type=click.Path(file_okay=False, readable=False),
+              help='directory in which to write the taxonomy mapping file')
+@click.option('-p', '--separator', default=';',
+              help='taxonomy strings are separated with this string pattern.')
+@click.option('-g', '--genus', default=' g__',
+              help='Placeholder to use for taxa that have no genus-level match'
+              ' in reference taxonomy file. Should match the conventions '
+              'that are used in that reference taxonomy file.')
+@click.option('-s', '--species', default=' s__',
+              help='Placeholder to use for taxa that have no species-level '
+              'match in reference taxonomy file. Should match the conventions '
+              'that are used in that reference taxonomy file.')
+def annotate_sequence_ids(infile, expected_taxonomy, outdir, separator,
+                          genus, species):
+    'Reprocess the expected taxonomy to explicitly classify each sequence'
+    sample_list, taxa = parse_taxonomy_file(infile)
+
+    # parse expected taxonomy
+    reader = csv.reader(expected_taxonomy, delimiter='\t')
+    next(reader)
+    expected = {r[0]: r[0].split(separator)[-2:]+[0] for r in reader}
+
+    _, _, new_taxa = find_matching_taxonomies(sample_list, taxa, expected,
+                                              separator, genus, species,
+                                              expected_taxonomy.name)
+
+    # Write to file
+    if not exists(outdir):
+        makedirs(outdir)
+
+    est_filename = join(outdir, 'expected-sequence-taxonomies.tsv')
+    with open(est_filename, "w") as dest:
+        writer = csv.writer(dest, delimiter='\t')
+        writer.writerow(['Taxonomy', 'Standard Taxonomy'])
+        for name, t in new_taxa.items():
+            writer.writerow([t[0], name])
+
+    print_warning()
+
+
+if __name__ == '__main__':
+    main()
