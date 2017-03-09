@@ -148,10 +148,10 @@ def find_matching_taxonomies(sample_list, taxa, ref_taxa, sep, gen, sp,
                 species = list(species_set)[0]
 
             if species not in new_taxa.keys():
-                new_taxa[species] = (name, t[1])
+                new_taxa[species] = ([name], t[1])
             else:
                 # if species is replicated, collapse abundances
-                new_taxa[species] = (name,
+                new_taxa[species] = (new_taxa[species][0] + [name],
                                      add_lists(new_taxa[species][1], t[1]))
                 duplicates.append((name, species))
 
@@ -164,20 +164,22 @@ def find_matching_taxonomies(sample_list, taxa, ref_taxa, sep, gen, sp,
                 genus = list(genus_set)[0]
 
             if genus not in new_taxa.keys():
-                new_taxa[genus] = (name, t[1])
+                new_taxa[genus] = ([name], t[1])
             else:
                 # if genus is replicated, collapse abundances
-                new_taxa[genus] = (name, add_lists(new_taxa[genus][1], t[1]))
+                new_taxa[genus] = (new_taxa[genus][0] + [name],
+                                   add_lists(new_taxa[genus][1], t[1]))
                 duplicates.append((name, genus))
 
         elif match == 'family':
             family_match += 1
 
             if family not in new_taxa.keys():
-                new_taxa[family] = (name, t[1])
+                new_taxa[family] = ([name], t[1])
             else:
                 # if genus is replicated, collapse abundances
-                new_taxa[family] = (name, add_lists(new_taxa[family][1], t[1]))
+                new_taxa[family] = (new_taxa[family][0] + [name],
+                                    add_lists(new_taxa[family][1], t[1]))
                 duplicates.append((name, family))
 
         # if failed, user needs to manually search and input new string
@@ -186,11 +188,11 @@ def find_matching_taxonomies(sample_list, taxa, ref_taxa, sep, gen, sp,
 
             lineage = manual_search(name, taxa_fp)
             if lineage not in new_taxa.keys():
-                new_taxa[lineage] = (name, t[1])
+                new_taxa[lineage] = ([name], t[1])
             else:
                 # if genus is replicated, collapse abundances
-                new_taxa[lineage] = (name, add_lists(new_taxa[lineage][1],
-                                                     t[1]))
+                new_taxa[lineage] = (new_taxa[lineage][0] + [name],
+                                     add_lists(new_taxa[lineage][1], t[1]))
                 duplicates.append((name, lineage))
 
     # Print results
@@ -326,8 +328,9 @@ def annotate_sequence_ids(infile, expected_taxonomy, outdir, separator,
     with open(est_filename, "w") as dest:
         writer = csv.writer(dest, delimiter='\t')
         writer.writerow(['Taxonomy', 'Standard Taxonomy'])
-        for name, t in new_taxa.items():
-            writer.writerow([t[0], name])
+        for name, ts in new_taxa.items():
+            for t in ts[0]:
+                writer.writerow([t, name])
 
     print_warning()
 
