@@ -246,7 +246,11 @@ def print_warning():
               help='Placeholder to use for taxa that have no species-level '
               'match in reference taxonomy file. Should match the conventions '
               'that are used in that reference taxonomy file.')
-def main(infile, outdir, ref_taxa, separator, genus, species):
+@click.option('-d', '--identifiers', default=False,
+              help='Option to allow writing database identifiers for matching '
+              'reference taxonomies. Will write one database identifier per'
+              'taxonomy. Deprecating in favor of database-identifiers.py.')
+def main(infile, outdir, ref_taxa, separator, genus, species, identifiers):
     '''Generate full taxonomy strings from a reference database, given
     a list of "source" genus and species names.
     '''
@@ -274,9 +278,11 @@ def main(infile, outdir, ref_taxa, separator, genus, species):
             abundances = ["{:.10f}".format(n) for n in t[1]]
             dest.write('{0}\t{1}\n'.format(name, '\t'.join(abundances)))
 
-    with open(join(outdir, 'database-identifiers.tsv'), "w") as dest:
-        for t, seq_id in seq_ids.items():
-            dest.write('{0}\t{1}\n'.format(t, '\t'.join(seq_id)))
+    # write out one database identifier for each taxonomy string
+    if identifiers:
+        with open(join(outdir, 'database-identifiers.tsv'), "w") as dest:
+            for t, seq_id in seq_ids.items():
+                dest.write('{0}\t{1}\n'.format(t, '\t'.join(seq_id)))
 
     print_warning()
 
